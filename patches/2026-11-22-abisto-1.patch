@@ -1,0 +1,83 @@
+# Абисто — модуль 1 «Главная и категории» (аудит 2026-11-22). Патч для zis-baraholka. НЕ применён.
+# Применение (владелец, после проверки):
+#   git apply --unidiff-zero --check 2026-11-22-abisto-1.patch
+#   git apply --unidiff-zero 2026-11-22-abisto-1.patch
+#   python3 tools/gen_home_seo.py      # пересобирает блок «Категории объявлений» в index.html
+# Нулевой контекст — потому что соседние строки index.html и k.js содержат реквизиты;
+# в публичный репозиторий аудита их не копируем.
+# Состав:
+#  1) index.html:662 — верхнее меню: href="#" -> /kategorii/<раздел> (клик по-прежнему перехватывает JS).
+#  2) kategorii/k.js:3 — «Свежие объявления»: сортировка по свежести, без демо, цена как в gen_ob.py,
+#     серверный (SSR) список не затирается при ошибке или пустом ответе.
+#  3) tools/gen_home_seo.py — новый генератор статического блока seo-cats по kufar_tree.TREE.
+# Проверено на копии: патч применяется к index.html с blob SHA de3c839d20a58602dfd8edaa1dc3f178bf220933,
+# генератор идемпотентен, k.js строка 3 синтаксически корректна.
+diff --git a/index.html b/index.html
+index de3c839..e5a2037 100644
+--- a/index.html
++++ b/index.html
+@@ -662 +662 @@ header .search{overflow:visible}
+-    <nav class="tb-links" aria-label="Разделы"><a href="#" data-topcat="realty">Недвижимость</a><a href="#" data-topcat="auto">Авто</a><a href="#" data-topcat="services">Услуги</a><a href="#" data-topcat="jobs">Работа</a><a href="#" data-topcat="business">Для бизнеса</a><a href="#" data-topcat="free">Даром</a><a href="#safety">Безопасность</a></nav>
++    <nav class="tb-links" aria-label="Разделы"><a href="/kategorii/realty" data-topcat="realty">Недвижимость</a><a href="/kategorii/auto" data-topcat="auto">Авто</a><a href="/kategorii/services" data-topcat="services">Услуги</a><a href="/kategorii/jobs" data-topcat="jobs">Работа</a><a href="/kategorii/business" data-topcat="business">Для бизнеса</a><a href="#" data-topcat="free">Даром</a><a href="#safety">Безопасность</a></nav>
+diff --git a/kategorii/k.js b/kategorii/k.js
+--- a/kategorii/k.js
++++ b/kategorii/k.js
+@@ -3 +3 @@
+-(async()=>{const box=document.getElementById("ads");const C=window.ZIS_CONFIG||{};if(!box||!C.url)return;const [cat,sub]=(box.dataset.q||"").split("|");let u=C.url+"/rest/v1/ads?select=id,title,price,city&status=eq.active&limit=12";if(cat)u+="&cat=eq."+encodeURIComponent(cat);if(sub)u+="&sub=eq."+encodeURIComponent(sub);try{const r=await fetch(u,{headers:{apikey:C.anonKey,Authorization:"Bearer "+C.anonKey}});const d=r.ok?await r.json():[];const e=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));box.innerHTML=d.length?d.map(a=>'<a class="ad" href="/ob/'+a.id+'-'+obSlug(a.title)+'"><b>'+(a.price!=null?e(a.price)+" ƃ":"Договорная")+'</b>'+e(a.title)+'<div class="muted">'+e(a.city||"")+'</div></a>').join(""):'<p class="muted">Пока нет объявлений — <a href="/#post">разместите первое</a>.</p>'}catch(_){box.innerHTML=""}})();
++(async()=>{const box=document.getElementById("ads");const C=window.ZIS_CONFIG||{};if(!box||!C.url)return;const [cat,sub]=(box.dataset.q||"").split("|");let u=C.url+"/rest/v1/ads?select=id,title,price,price_type,city&status=eq.active&is_demo=not.is.true&order=bumped_at.desc.nullslast,created_at.desc&limit=12";if(cat)u+="&cat=eq."+encodeURIComponent(cat);if(sub)u+="&sub=eq."+encodeURIComponent(sub);const hadSsr=!!box.querySelector(".ad");try{const r=await fetch(u,{headers:{apikey:C.anonKey,Authorization:"Bearer "+C.anonKey}});if(!r.ok)return;const d=await r.json();if(!Array.isArray(d)||(!d.length&&hadSsr))return;const e=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));const pr=a=>a.price_type==="free"?"Даром":(a.price!=null&&a.price_type!=="deal")?e(Number(a.price).toLocaleString("ru-RU"))+' <span aria-label="руб.">ƃ</span>':"Договорная";box.innerHTML=d.length?d.map(a=>'<a class="ad" href="/ob/'+a.id+'-'+obSlug(a.title)+'"><b>'+pr(a)+'</b>'+e(a.title)+'<span class="muted" style="display:block">'+e(a.city||"")+'</span></a>').join(""):'<p class="muted">Пока нет объявлений — <a href="/#post">разместите первое</a>.</p>'}catch(_){/* оставляем серверный список */}})();
+diff --git a/tools/gen_home_seo.py b/tools/gen_home_seo.py
+new file mode 100644
+index 0000000..c1ab86c
+--- /dev/null
++++ b/tools/gen_home_seo.py
+@@ -0,0 +1,50 @@
++# -*- coding: utf-8 -*-
++"""Пересобирает статический блок «Категории объявлений» (<div class="seo-cats">) в index.html
++по дереву tools/kufar_tree.TREE — те же разделы, названия, порядок и адреса, что в /kategorii/.
++Запускать после tools/gen_kategorii.py:  python3 tools/gen_home_seo.py"""
++import os, re, sys, html
++sys.path.insert(0, os.path.dirname(__file__))
++from kufar_tree import TREE, subs_of, alias_of
++
++ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++E = lambda s: html.escape(str(s), quote=True)
++TRM = {"а":"a","б":"b","в":"v","г":"g","д":"d","е":"e","ё":"e","ж":"zh","з":"z","и":"i","й":"y","к":"k","л":"l","м":"m","н":"n","о":"o","п":"p","р":"r","с":"s","т":"t","у":"u","ф":"f","х":"h","ц":"c","ч":"ch","ш":"sh","щ":"sch","ъ":"","ы":"y","ь":"","э":"e","ю":"yu","я":"ya","і":"i","ў":"u"}
++
++def slug(t):
++    return re.sub(r"[^a-z0-9]+", "-", "".join(TRM.get(c, c) for c in t.lower())).strip("-")
++
++def page_slug(cid, sub=None):  # как в gen_kategorii.py
++    return cid if not sub else cid + "-" + slug(sub)
++
++def block():
++    out = []
++    for cid, name, subs in TREE:
++        li = []
++        for x in subs:
++            s = subs_of(x); al = alias_of(x)
++            li.append(f'<li><a href="/kategorii/{page_slug(*(al if al else (cid, s)))}">{E(s)}</a></li>')
++        out.append(f'<section><h3><a href="/kategorii/{cid}">{E(name)}</a></h3><ul>{"".join(li)}</ul></section>')
++    return '<div class="seo-cats">' + "".join(out) + "</div>"
++
++def main():
++    p = os.path.join(ROOT, "index.html")
++    s = open(p, encoding="utf-8").read()
++    a = s.index('<div class="seo-cats">')
++    b = s.index("</div>", a) + len("</div>")
++    assert "<div" not in s[a + 5:b - 6], "внутри seo-cats неожиданно есть <div>"
++    s = s[:a] + block() + s[b:]
++    # проверка: все ссылки блока ведут на существующие «живые» страницы /kategorii/ (не на переадресации)
++    kd = os.path.join(ROOT, "kategorii")
++    if os.path.isdir(kd):
++        bad = []
++        for u in re.findall(r'href="/kategorii/([a-z0-9-]+)"', block()):
++            f = os.path.join(kd, u + ".html")
++            if not os.path.exists(f) or "Раздел переехал" in open(f, encoding="utf-8").read():
++                bad.append(u)
++        if bad:
++            print("ВНИМАНИЕ, ссылки на отсутствующие/переадресующие страницы:", bad)
++    open(p, "w", encoding="utf-8").write(s)
++    print("seo-cats:", len(TREE), "разделов,", sum(len(x[2]) for x in TREE), "подкатегорий")
++
++if __name__ == "__main__":
++    main()
