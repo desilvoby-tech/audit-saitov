@@ -1,0 +1,120 @@
+diff --git a/index.html b/index.html
+index 611c4aa..7d7814e 100644
+--- a/index.html
++++ b/index.html
+@@ -1059,0 +1060 @@ function searchParams(s,offset=0,limit=PAGE){
++  if(p.q!=null){p.q=p.q.replace(/[%_\\]/g," ").replace(/\s+/g," ").trim();if(!p.q)delete p.q}
+@@ -1067,0 +1069,29 @@ async function search(s,offset=0,limit=PAGE){
++/* Поиск в адресе страницы, числа, раскладка (аудит, модуль 2, 23.11.2026) */
++let homeTok=0, layoutFrom="";
++function numIn(v){v=String(v??"").replace(/,/g,".").replace(/[^\d.]/g,"");const i=v.indexOf(".");if(i>=0)v=v.slice(0,i+1)+v.slice(i+1).replace(/\./g,"");v=v.replace(/\.$/,"");return v.startsWith(".")?"0"+v:v}
++function fixRange(a,b){if(a!==""&&b!==""&&+a>+b)return [b,a];return [a,b]}
++const SORTS=["new","cheap","dear","popular"];
++const SKEYS=["q","cat","sub","region","city","cond","min","max","user","photo","sort"],isSKey=k=>SKEYS.includes(k)||/^[eft]\./.test(k);
++function sToQS(s,base=""){const u=new URLSearchParams(base);[...u.keys()].filter(isSKey).forEach(k=>u.delete(k));
++  ["q","cat","sub","region","city","cond","min","max","user"].forEach(k=>{if(s[k])u.set(k,String(s[k]))});
++  if(s.photo)u.set("photo","1"); if(s.sort&&s.sort!=="new")u.set("sort",s.sort);
++  for(const [k,v] of Object.entries(s.eq||{}))if(v)u.set("e."+k,v);
++  for(const [k,v] of Object.entries(s.nmin||{}))if(v)u.set("f."+k,v);
++  for(const [k,v] of Object.entries(s.nmax||{}))if(v)u.set("t."+k,v);
++  return u.toString()}
++function qsToS(str){const u=new URLSearchParams(str),s=freshFilters(),g=k=>(u.get(k)||"").slice(0,100);
++  s.q=g("q").trim();
++  const c=CAT[g("cat")];if(c){s.cat=g("cat");const sb_=g("sub");if(c.subs.includes(sb_)||(c.alias&&c.alias[sb_]))s.sub=sb_}
++  if(REGIONS[g("region")]){s.region=g("region");if(REGIONS[s.region].includes(g("city")))s.city=g("city")}
++  if(["new","used"].includes(g("cond")))s.cond=g("cond");
++  s.min=numIn(g("min"));s.max=numIn(g("max"));[s.min,s.max]=fixRange(s.min,s.max);
++  s.photo=u.get("photo")==="1"; if(SORTS.includes(g("sort")))s.sort=g("sort");
++  if(/^[0-9a-f-]{36}$/i.test(g("user")))s.user=g("user");
++  for(const [k,v] of u){const m=/^([eft])\.([\w-]{1,40})$/.exec(k);if(!m||!v)continue;
++    if(m[1]==="e")s.eq[m[2]]=v.slice(0,100);else{const n=numIn(v);if(n)(m[1]==="f"?s.nmin:s.nmax)[m[2]]=n}}
++  if(!s.cat){for(const k of Object.keys(s.eq))if(k!=="delivery"&&k!=="exchange")delete s.eq[k];s.nmin={};s.nmax={}}
++  return s}
++function syncUrl(){if(currentView()!=="home")return;const cur=location.search.replace(/^\?/,""),qs=sToQS(S,cur);
++  if(qs!==cur)history.replaceState(history.state,"",location.pathname+(qs?"?"+qs:"")+location.hash)}
++const EN_RU={q:"й",w:"ц",e:"у",r:"к",t:"е",y:"н",u:"г",i:"ш",o:"щ",p:"з","[":"х","]":"ъ",a:"ф",s:"ы",d:"в",f:"а",g:"п",h:"р",j:"о",k:"л",l:"д",";":"ж","'":"э",z:"я",x:"ч",c:"с",v:"м",b:"и",n:"т",m:"ь",",":"б",".":"ю","`":"ё"};
++function fixLayout(q){if(!/^[a-z\[\];',.`\s]+$/i.test(q)||!/[a-z]/i.test(q))return "";const r=[...q.toLowerCase()].map(c=>EN_RU[c]??c).join("");return /[а-яё]/.test(r)&&r!==q.toLowerCase()?r:""}
+@@ -1323 +1353 @@ async function renderHome(){
+-  resolveAlias();updMobileSearch();
++  resolveAlias();updMobileSearch();syncUrl();const myTok=++homeTok;
+@@ -1357,2 +1387,6 @@ async function renderHome(){
+-    const [r]=await Promise.all([search(S),loadPromos().catch(()=>{})]); homeItems=r.items; homeTotal=r.total;
+-    if(currentView()!=="home") return;
++    let [r]=await Promise.all([search(S),loadPromos().catch(()=>{})]);
++    if(currentView()!=="home"||myTok!==homeTok) return;
++    layoutFrom="";
++    if(!r.total&&S.q){const alt=fixLayout(S.q);if(alt){const r2=await search({...S,q:alt});if(myTok!==homeTok)return;if(r2.total){layoutFrom=S.q;S.q=alt;$("#q").value=alt;r=r2;syncUrl();const h=$(".toolbar h1");if(h)h.textContent="Поиск: «"+alt+"»"}}}
++    homeItems=r.items; homeTotal=r.total;
++    if(layoutFrom)$("#results").insertAdjacentHTML("beforebegin",`<p class="note" id="layoutNote">Показаны результаты по запросу «${esc(S.q)}» — исправлена раскладка клавиатуры («${esc(layoutFrom)}»).</p>`);
+@@ -2136 +2170 @@ function wire(){
+-  {const u=new URLSearchParams(location.search).get("q");if(u){S.q=u.slice(0,100);$("#q").value=S.q}}
++  if(location.search){S=qsToS(location.search);$("#q").value=S.q;$("#regionTop").value=S.region}
+@@ -2159 +2193 @@ function wire(){
+-    if(id==="loadMore"){t.disabled=true;t.textContent="Загружаем…";try{const r=await search(S,homeItems.length);homeItems=homeItems.concat(r.items);homeTotal=r.total;paintResults()}catch(err){toast(errText(err));t.disabled=false}}
++    if(id==="loadMore"){t.disabled=true;t.textContent="Загружаем…";const tk=homeTok;try{const r=await search(S,homeItems.length);if(tk!==homeTok)return;homeItems=homeItems.concat(r.items);homeTotal=r.total;paintResults()}catch(err){toast(errText(err));t.disabled=false}}
+@@ -2202 +2236 @@ function wire(){
+-    if(id==="fMin"||id==="fMax"){S[id==="fMin"?"min":"max"]=t.value.replace(/[^\d.]/g,"");renderHome()}
++    if(id==="fMin"||id==="fMax"){S[id==="fMin"?"min":"max"]=numIn(t.value);[S.min,S.max]=fixRange(S.min,S.max);renderHome()}
+@@ -2204,2 +2238 @@ function wire(){
+-    if(t.dataset.nmin){S.nmin[t.dataset.nmin]=t.value.replace(/[^\d.]/g,"");renderHome()}
+-    if(t.dataset.nmax){S.nmax[t.dataset.nmax]=t.value.replace(/[^\d.]/g,"");renderHome()}
++    if(t.dataset.nmin||t.dataset.nmax){const k=t.dataset.nmin||t.dataset.nmax;(t.dataset.nmin?S.nmin:S.nmax)[k]=numIn(t.value);const [a,b]=fixRange(S.nmin[k]||"",S.nmax[k]||"");if(a)S.nmin[k]=a;else delete S.nmin[k];if(b)S.nmax[k]=b;else delete S.nmax[k];renderHome()}
+diff --git a/tools/migration-2026-11-23-search.sql b/tools/migration-2026-11-23-search.sql
+new file mode 100644
+index 0000000..efbe6e4
+--- /dev/null
++++ b/tools/migration-2026-11-23-search.sql
+@@ -0,0 +1,53 @@
++-- Абисто · поиск по словам (аудит, модуль 2, 2026-11-23)
++-- ЗАГОТОВКА. НЕ ПРИМЕНЕНА. Применять только после подтверждения владельца (Supabase → SQL Editor).
++--
++-- Что даёт:
++--   * слова запроса ищутся в любом порядке и в любой форме: «угловой диван» → «Диван угловой»,
++--     «ремонт ноутбука» → «Ремонт ноутбуков…», «стиральную машину» → «Стиральная машина…»;
++--   * ё = е: «елку» находит «ёлку»;
++--   * символы % и _ больше не работают как «любой текст» (сейчас «р%т» — шаблон LIKE);
++--     запрос только из знаков препинания считается пустым (как сейчас пустая строка);
++--   * по-прежнему работает поиск подстроки; слова можно писать раздельно («eco 235» → «Eco-235»);
++--
++-- Как подключить (после проверки):
++--   в определении public.search_ads условие по тексту (p->>'q') заменить на
++--     and public.ad_text_match(a.title, a.descr, p->>'q')
++--   (если в функции объявление называется не «a» — подставить своё имя).
++--   Там же рекомендуется:
++--     limit  least(greatest(coalesce((p->>'limit')::int, 40), 1), 100)
++--     offset greatest(coalesce((p->>'offset')::int, 0), 0)
++--     цена:  public.ad_num(p->>'min') / public.ad_num(p->>'max') вместо ::numeric
++--            (сейчас «1.2.3» в поле цены даёт ошибку базы на экране).
++--
++-- Откат: drop function public.ad_text_match(text,text,text); drop function public.ad_norm(text); drop function public.ad_num(text);
++--        и вернуть прежнее условие в search_ads.
++
++create or replace function public.ad_norm(t text) returns text
++language sql immutable parallel safe as
++$$ select translate(lower(coalesce(t, '')), 'ё', 'е') $$;
++
++create or replace function public.ad_num(t text) returns numeric
++language sql immutable parallel safe as
++$$ select case when btrim(coalesce(t, '')) ~ '^\d+(\.\d+)?$' then btrim(t)::numeric end $$;
++
++create or replace function public.ad_text_match(title text, descr text, q text) returns boolean
++language plpgsql immutable parallel safe as $$
++declare
++  nq  text := btrim(regexp_replace(public.ad_norm(q), '\s+', ' ', 'g'));
++  doc text := public.ad_norm(title) || ' ' || public.ad_norm(descr);
++  tq  tsquery;
++begin
++  if nq = '' or nq !~ '[[:alnum:]]' then return true; end if;
++  -- 1) подстрока целиком (без спецсимволов LIKE)
++  if strpos(doc, nq) > 0 then return true; end if;
++  -- 2) каждое слово запроса встречается как подстрока (любой порядок; «eco 235», «ноут»)
++  if not exists (
++       select 1 from regexp_split_to_table(nq, '[^[:alnum:]]+') w
++       where w <> '' and strpos(doc, w) = 0) then
++    return true;
++  end if;
++  -- 3) все слова запроса в любом порядке, с русской морфологией (формы слов)
++  tq := plainto_tsquery('russian', nq);
++  if tq is null or numnode(tq) = 0 then return false; end if;
++  return to_tsvector('russian', doc) @@ tq;
++end $$;
